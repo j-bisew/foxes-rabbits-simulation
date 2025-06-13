@@ -3,8 +3,10 @@ package quadtree
 import (
 	"fmt"
 	"strings"
-	"kroliki/geom"
+
+	"github.com/j-bisew/foxes-rabbits-simulation/geom"
 )
+
 
 type Point = geom.Point
 type Rectangle = geom.Rectangle
@@ -17,7 +19,7 @@ type QuadTree struct {
 	divided bool
 }
 
-func newQuadTree(capacity int, rect Rectangle) *QuadTree {
+func NewQuadTree(capacity int, rect Rectangle) *QuadTree {
 	return &QuadTree{
 		capacity: capacity,
 		boundary: rect,
@@ -32,24 +34,24 @@ func (qt *QuadTree) subdivide() {
 	w := qt.boundary.Width / 2
 	h := qt.boundary.Height / 2
 
-	qt.ne = newQuadTree(qt.capacity, geom.Rectangle{X: x+w, Y: y+h, Width: w, Height: h})
-	qt.nw = newQuadTree(qt.capacity, geom.Rectangle{X: x, Y: y+h, Width: w, Height: h})
-	qt.se = newQuadTree(qt.capacity, geom.Rectangle{X: x+w, Y: y, Width: w, Height: h})
-	qt.sw = newQuadTree(qt.capacity, geom.Rectangle{X: x, Y: y, Width: w, Height: h})
+	qt.ne = NewQuadTree(qt.capacity, geom.Rectangle{X: x+w, Y: y+h, Width: w, Height: h})
+	qt.nw = NewQuadTree(qt.capacity, geom.Rectangle{X: x, Y: y+h, Width: w, Height: h})
+	qt.se = NewQuadTree(qt.capacity, geom.Rectangle{X: x+w, Y: y, Width: w, Height: h})
+	qt.sw = NewQuadTree(qt.capacity, geom.Rectangle{X: x, Y: y, Width: w, Height: h})
 
 	qt.divided = true
 
 	for _, point := range qt.points {
-		_ = qt.ne.insert(point) ||
-		qt.nw.insert(point) ||
-		qt.se.insert(point) ||
-		qt.sw.insert(point)
+		_ = qt.ne.Insert(point) ||
+		qt.nw.Insert(point) ||
+		qt.se.Insert(point) ||
+		qt.sw.Insert(point)
 	}
 
 	qt.points = nil
 }
 
-func (qt *QuadTree) insert(point Point) bool {
+func (qt *QuadTree) Insert(point Point) bool {
 	if !qt.boundary.Contains(point) {
 		return false
 	}
@@ -61,21 +63,17 @@ func (qt *QuadTree) insert(point Point) bool {
 		}
 		qt.subdivide()
 	}
-	return qt.ne.insert(point) ||
-		qt.nw.insert(point) ||
-		qt.se.insert(point) ||
-		qt.sw.insert(point)
+	return qt.ne.Insert(point) ||
+		qt.nw.Insert(point) ||
+		qt.se.Insert(point) ||
+		qt.sw.Insert(point)
 }
 
-func (qt *QuadTree) String() string {
-	return qt.stringWithIndent("")
-}
-
-func (qt *QuadTree) query(rangeRect Rectangle, found *[]Point) {
+func (qt *QuadTree) Query(rangeRect Rectangle, found *[]Point) {
 	if !qt.boundary.Intersects(rangeRect) {
 		return
 	}
-
+	
 	if !qt.divided {
 		for _, p := range qt.points {
 			if rangeRect.Contains(p) {
@@ -84,11 +82,15 @@ func (qt *QuadTree) query(rangeRect Rectangle, found *[]Point) {
 		}
 		return
 	}
+	
+	qt.ne.Query(rangeRect, found)
+	qt.nw.Query(rangeRect, found)
+	qt.se.Query(rangeRect, found)
+	qt.sw.Query(rangeRect, found)
+}
 
-	qt.ne.query(rangeRect, found)
-	qt.nw.query(rangeRect, found)
-	qt.se.query(rangeRect, found)
-	qt.sw.query(rangeRect, found)
+func (qt *QuadTree) String() string {
+	return qt.stringWithIndent("")
 }
 
 func (qt *QuadTree) stringWithIndent(indent string) string {
