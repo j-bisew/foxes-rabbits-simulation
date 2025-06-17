@@ -5,23 +5,16 @@ import (
 	"math/rand"
 
 	"github.com/j-bisew/foxes-rabbits-simulation/geom"
-	"github.com/j-bisew/foxes-rabbits-simulation/world"
+	"github.com/j-bisew/foxes-rabbits-simulation/interfaces"
 )
-
-type Entity interface {
-	Update(*world.World)
-	GetPosition() geom.Point
-	GetSpecies() string
-	GetFoodType() string
-	IsAlive() bool
-	GetEnergy() float64
-}
+type Entity = interfaces.Entity
+type WorldInterface = interfaces.WorldInterface
 
 type Animal struct {
 	Pos geom.Point
-	Energy, MaxEnergy float64
-	HungerTreshold, ReproductionTreshold float64
-	WellFedCooldown, ReproduceCooldown int
+	Energy, MaxEnergy, EnergyLoss float64
+	CriticalHungerThreshold float64
+	ReproduceCooldown int
 	SearchRadius float64
 	Species string
 	FoodType string
@@ -35,37 +28,23 @@ func (a *Animal) GetEnergy() float64 { return a.Energy }
 func (a *Animal) GetSpecies() string { return a.Species }
 func (a *Animal) GetFoodType() string { return a.FoodType }
 func (a *Animal) IsAlive() bool { return a.Alive }
+func (a *Animal) Kill() { a.Alive = false }
 
 
 // Hunger & Reproduction
-func (a *Animal) IsHungry() bool { return a.Energy < a.HungerTreshold }
-func (a *Animal) IsWellFed() bool { return a.Energy >= a.ReproductionTreshold && a.WellFedCooldown > 0 }
-func (a *Animal) UpdateWellFed() { a.WellFedCooldown -= 1 }
+func (a *Animal) ConsumeEnergy() { a.Energy -= a.EnergyLoss }
 
-func (a *Animal) Eat(entity Entity, world *world.World) {
-	a.Energy += entity.GetEnergy()
-	if a.Energy > a.MaxEnergy { a.Energy = a.MaxEnergy }
-	a.WellFedCooldown = 15
-	a.ReproduceCooldown = 0
-
-	world.Consume(entity)
+func (a *Animal) CanReproduce() bool { return a.ReproduceCooldown == 0 }
+func (a *Animal) UpdateReproduce() { 
+    if a.ReproduceCooldown > 0 {
+        a.ReproduceCooldown--
+    }
 }
-
-func (a *Animal) CanReproduce() bool { return a.IsWellFed() && a.ReproduceCooldown == 0 }
-func (a *Animal) UpdateReproduce() { a.ReproduceCooldown -= 1 }
-
-func (a *Animal) Reproduce(mate *Animal, world *world.World) {
-	newAnimal := world.CreateOffspring(a, mate)
-
-	a.ReproduceCooldown = 20
-	mate.ReproduceCooldown = 20
+func (a *Animal) UpdateEnergy(amount float64) { 
+    if a.Energy > 0 {
+        a.Energy += amount
+    }
 }
-
-func (a *Animal) ConsumeEnergy() {
-	a.Energy -= 1.0
-	if a.Energy <= 0 { a.Alive = false }
-}
-
 
 // Movement & Search
 func (a *Animal) Move(dx, dy float64) {
@@ -115,35 +94,21 @@ func (a *Animal) findClosest(entities []Entity) Entity {
 	return closest
 }
 
-func (a *Animal) search(world *world.World, searchType string) {
-	searchRect := geom.Rectangle{
-		X: a.Pos.X - a.SearchRadius,
-		Y: a.Pos.Y - a.SearchRadius,
-		Width: a.SearchRadius*2,
-		Height: a.SearchRadius*2,
-	}
-
-	var nearbyEntities []Entity
-	world.QuadTree.Query(searchRect, &nearbyEntities)
-
-	var targets []Entity
-
-	if searchType == "food" {
-		for _, entity := range nearbyEntities {
-			if entity.GetSpecies() == a.FoodType && entity.IsAlive() {
-				targets = append(targets, entity)
-			}
-		}
+func (a *Animal) search(world WorldInterface, searchType string) {
+    var targets []Entity
+    if searchType == "food" {
+        targets = world.FindNearbyEntities(a.Pos, a.SearchRadius, a.FoodType)
 	} else if searchType == "mate" {
-		for _, entity := range nearbyEntities {
-			animal, ok := entity.(*Animal)
-			if ok &&
-				entity.GetSpecies() == a.Species &&
-				entity.IsAlive() &&
-				animal.CanReproduce() &&
-				entity != a {
+		nearby := world.FindNearbyEntities(a.Pos, a.SearchRadius, a.Species)
+		
+		for _, entity := range nearby {
+			if entity != Entity(a) && entity.IsAlive() {
+				if rabbit, ok := entity.(*Rabbit); ok && rabbit.ReproduceCooldown == 0 {
+					targets = append(targets, entity)
+				} else if fox, ok := entity.(*Fox); ok && fox.ReproduceCooldown == 0 {
 					targets = append(targets, entity)
 				}
+			}
 		}
 	}
 	
@@ -154,9 +119,14 @@ func (a *Animal) search(world *world.World, searchType string) {
 		_, _, distance := a.DistanceTo(closest.GetPosition())
 		if distance < 5.0 {
 			if searchType == "food" {
-				a.Eat(closest, world)
-			} else {
-				a.Reproduce(closest.(*Animal), world)
+				energyGained := world.ConsumeFood(closest, Entity(a))
+				a.Energy += energyGained
+				if a.Energy > a.MaxEnergy { a.Energy = a.MaxEnergy }
+			} else if searchType == "mate" {
+				world.CreateOffspring(Entity(a), closest)
+				a.ReproduceCooldown = 40
+				a.UpdateEnergy(-10.0)
+				closest.UpdateEnergy(-10.0)
 			}
 		}
 	} else {
@@ -165,19 +135,21 @@ func (a *Animal) search(world *world.World, searchType string) {
 }
 
 // Main Behavior
-func (a *Animal) Update(world *world.World) {
-	a.ConsumeEnergy()
-	if !a.IsAlive() {
-		return
-	}
-	a.UpdateReproduce()
-	a.UpdateWellFed()
+func (a *Animal) Update(world WorldInterface) {
+    a.ConsumeEnergy()
+	
+    if a.Energy <= 0 {
+        a.Alive = false
+        return
+    }
 
-	if a.IsHungry() {
-		a.search(world, "food")
-	} else if a.CanReproduce() {
-		a.search(world, "mate")
-	} else {
-		a.MoveRandomly()
-	}
+	a.UpdateReproduce()
+    
+    if a.Energy < a.CriticalHungerThreshold {
+        a.search(world, "food")
+    } else if a.ReproduceCooldown == 0 {
+        a.search(world, "mate")
+    } else {
+        a.search(world, "food")
+    }
 }
