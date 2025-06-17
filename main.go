@@ -2,13 +2,19 @@ package main
 
 import (
 	"flag"
-	"fmt"
+
+	"github.com/j-bisew/foxes-rabbits-simulation/gui"
+	"github.com/j-bisew/foxes-rabbits-simulation/world"
 )
 
 func main() {
-	// var width = flag.Float64("w", 400, "Board width")
-	// var height = flag.Float64("h", 400, "Board height")
+    width := flag.Int("w", 400, "width of board")
+    height := flag.Int("h", 200, "height of board")
 
-	flag.Parse()
-	fmt.Println("Ecosystem Simulation Starting...")
+    flag.Parse()
+
+    world := world.NewWorld(*width, *height)
+    
+    gui := gui.NewGUI(world)
+    gui.Run()
 }
